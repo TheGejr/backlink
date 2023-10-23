@@ -12,7 +12,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-var VERSION = "1.1.0"
+var VERSION = "1.1.1"
 
 func usage() {
 	w := os.Stderr

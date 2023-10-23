@@ -12,7 +12,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-var VERSION = "1.0.0"
+var VERSION = "1.1.0"
 
 func usage() {
 	w := os.Stderr
@@ -20,7 +20,6 @@ func usage() {
 	fmt.Fprintf(w, "Backlink returns a list of backlinks on a given website - both external and\n")
 	fmt.Fprintf(w, "internal resources.\n\n")
 	fmt.Fprintf(w, "  Options:\n")
-	// fmt.Fprintf(w, "    -h, --help\tDisplays this help message\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(w, "\nBacklink v%s was created by Malte Gejr <malte@gejr.dk>\n", VERSION)
 }
@@ -79,18 +78,16 @@ func getLinks(body io.Reader, domain string) []string {
 			return links
 		case html.StartTagToken, html.EndTagToken:
 			token := z.Token()
-			if "a" == token.Data {
+			if token.Data == "a" {
 				for _, attr := range token.Attr {
 					if attr.Key == "href" {
-						if strings.HasPrefix(attr.Val, "/") {
+						if strings.HasPrefix(attr.Val, "/") || strings.HasPrefix(attr.Val, "#") {
 							attr.Val = fmt.Sprintf("%s%s", domain, attr.Val)
 						}
 						links = append(links, attr.Val)
 					}
-
 				}
 			}
-
 		}
 	}
 }
@@ -121,5 +118,4 @@ func output(output []string, out *string) {
 			fmt.Fprintln(w, v)
 		}
 	}
-	// TODO: Add outputting to a file
 }

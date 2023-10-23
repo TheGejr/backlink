@@ -2,15 +2,15 @@ before:
   hooks:
     - go mod tidy
 builds:
-  - binary: bin/name
-    main: ./cmd/name
+  - binary: bin/backlink
+    main: ./backlink.go
     id: macos
     goos:
       - darwin
     goarch:
       - amd64
-  - binary: bin/name
-    main: ./cmd/name
+  - binary: bin/backlink
+    main: ./backlink.go
     id: linux
     goos:
       - linux
@@ -21,8 +21,8 @@ builds:
       - arm64
     env:
       - CGO_ENABLED=0
-  - binary: bin/name
-    main: ./cmd/name
+  - binary: bin/backlink
+    main: ./backlink.go
     id: windows
     goos:
       - windows
@@ -35,17 +35,15 @@ archives:
     builds:
       - macos
       - linux
-    name_template: name_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    name_template: backlink_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
     wrap_in_directory: true
-    replacements:
-      darwin: macOS
     format: tar.gz
     files:
       - LICENSE
   - id: windows
     builds:
       - windows
-    name_template: name_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    name_template: backlink_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
     wrap_in_directory: false
     format: zip
     files:
@@ -55,7 +53,7 @@ release:
 checksum:
   name_template: checksums.txt
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  name_template: "{{ incpatch .Version }}"
 changelog:
   sort: asc
   filters:

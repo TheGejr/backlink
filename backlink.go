@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-var VERSION = "1.1.2"
+var VERSION = "1.2.0"
 
 func usage() {
 	w := os.Stderr
@@ -27,6 +28,7 @@ func usage() {
 func main() {
 	flag.Usage = usage
 	help := flag.BoolP("help", "h", false, "Displays this help message")
+	insecure := flag.BoolP("insecure", "k", false, "Allow insecure server connections")
 	out := flag.StringP("output", "o", "", "Output to a file")
 
 	flag.Parse()
@@ -48,7 +50,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	res, err := run(domain)
+	res, err := run(domain, *insecure)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error encountered: %s", err)
 	}
@@ -56,7 +58,10 @@ func main() {
 	output(res, out)
 }
 
-func run(domain string) ([]string, error) {
+func run(domain string, insecure bool) ([]string, error) {
+	if insecure {
+		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	resp, err := http.Get(domain)
 	if err != nil {
 		return []string{}, err

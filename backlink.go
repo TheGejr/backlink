@@ -13,7 +13,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-var VERSION = "1.2.0"
+var VERSION = "1.4.0"
+var MAX_DEPTH int
 
 func usage() {
 	w := os.Stderr
@@ -29,6 +30,8 @@ func main() {
 	flag.Usage = usage
 	help := flag.BoolP("help", "h", false, "Displays this help message")
 	insecure := flag.BoolP("insecure", "k", false, "Allow insecure server connections")
+	recursive := flag.BoolP("recursive", "r", false, "Find backlinks recursively on the targeted website")
+	max_depth := flag.Int("max-depth", 5, "Max depth for recursive scanning")
 	out := flag.StringP("output", "o", "", "Output to a file")
 
 	flag.Parse()
@@ -36,6 +39,8 @@ func main() {
 		usage()
 		os.Exit(0)
 	}
+
+	MAX_DEPTH = *max_depth
 
 	if len(os.Args) < 2 {
 		fmt.Printf("domain is required\n\n")
@@ -50,15 +55,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	res, err := run(domain, *insecure)
+	current_depth := 1
+	res, err := run(domain, current_depth, *insecure, *recursive)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error encountered: %s", err)
+		fmt.Fprintf(os.Stderr, "Error encountered: %s\n", err)
 	}
+	res = removeDuplicateStr(res)
 
 	output(res, out)
 }
 
-func run(domain string, insecure bool) ([]string, error) {
+func run(domain string, current_depth int, insecure bool, recursive bool) ([]string, error) {
 	if insecure {
 		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
@@ -68,6 +75,24 @@ func run(domain string, insecure bool) ([]string, error) {
 	}
 
 	res := removeDuplicateStr(getLinks(resp.Body, domain))
+
+	// This recursive scanning, could be done alot better
+	// but it works and if it ain't broken - don't fix it
+	if recursive {
+		current_depth = current_depth + 1
+		for _, i := range res {
+			if current_depth >= MAX_DEPTH {
+				break
+			}
+			if strings.HasPrefix(i, domain) {
+				rec_res, err := run(i, current_depth, insecure, recursive)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error encountered: %s\n", err)
+				}
+				res = append(res, rec_res...)
+			}
+		}
+	}
 
 	return res, nil
 }
@@ -86,6 +111,9 @@ func getLinks(body io.Reader, domain string) []string {
 			if token.Data == "a" {
 				for _, attr := range token.Attr {
 					if attr.Key == "href" {
+						if strings.HasPrefix(attr.Val, "#") {
+							continue
+						}
 						if strings.HasPrefix(attr.Val, "/") || strings.HasPrefix(attr.Val, "#") {
 							attr.Val = fmt.Sprintf("%s%s", domain, attr.Val)
 						}

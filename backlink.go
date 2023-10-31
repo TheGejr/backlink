@@ -21,7 +21,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-var VERSION = "1.4.1"
+var VERSION = "1.4.2"
 
 type Backlink struct {
 	CurrentDepth    int

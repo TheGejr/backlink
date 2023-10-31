@@ -1,5 +1,12 @@
 package main
 
+// Issue 01:
+// The $domain argument must be passed as the very first argument, if options is present before the domain
+// `backlink` will panic because it's hardcoded to use `os.Args[1]` as domain.
+
+// Issue 02:
+// Sometimes without the recursive flag, it does a recursive scan with DEPTH=1
+
 import (
 	"crypto/tls"
 	"fmt"
@@ -7,14 +14,31 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/net/html"
 )
 
-var VERSION = "1.4.0"
-var MAX_DEPTH int
+var VERSION = "1.4.1"
+
+type Backlink struct {
+	CurrentDepth    int
+	LocalDomain     string
+	Uri             url.URL
+	LocalResources  map[string]bool
+	ExternResources map[string]bool
+	Options         Options
+}
+
+type Options struct {
+	MaxDepth  int
+	Insecure  bool
+	Recursive bool
+}
+
+var WHITELIST_SCHEME = []string{"http", "https", ""} // empty string to capture backlinks like "/news"
 
 func usage() {
 	w := os.Stderr
@@ -40,64 +64,94 @@ func main() {
 		os.Exit(0)
 	}
 
-	MAX_DEPTH = *max_depth
-
 	if len(os.Args) < 2 {
 		fmt.Printf("domain is required\n\n")
 		usage()
 		os.Exit(1)
 	}
 	domain := os.Args[1]
-	_, err := url.ParseRequestURI(domain)
+	url_obj, err := url.ParseRequestURI(domain)
 	if err != nil {
-		fmt.Printf("domain must be a valid domain, starting with http:// or https://\n\n")
+		fmt.Fprintf(os.Stderr, "domain must be a valid domain, starting with http:// or https://\n\n")
 		usage()
 		os.Exit(1)
 	}
 
-	current_depth := 1
-	res, err := run(domain, current_depth, *insecure, *recursive)
+	backlink := Backlink{
+		CurrentDepth:    1,
+		Uri:             *url_obj,
+		LocalDomain:     url_obj.Scheme + "://" + url_obj.Host,
+		LocalResources:  make(map[string]bool),
+		ExternResources: make(map[string]bool),
+		Options: Options{
+			MaxDepth:  *max_depth,
+			Insecure:  *insecure,
+			Recursive: *recursive,
+		},
+	}
+	backlink.LocalResources[url_obj.Path] = false
+
+	err = backlink.Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error encountered: %s\n", err)
 	}
-	res = removeDuplicateStr(res)
 
-	output(res, out)
+	backlink.Output(out)
 }
 
-func run(domain string, current_depth int, insecure bool, recursive bool) ([]string, error) {
-	if insecure {
+func (b Backlink) Run() error {
+	if b.Options.Insecure {
 		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	resp, err := http.Get(domain)
-	if err != nil {
-		return []string{}, err
+
+	for resource, scanned := range b.LocalResources {
+		if !scanned {
+			b.LocalResources[resource] = true // Resource now scanned
+			resp, err := http.Get(b.LocalDomain + resource)
+			if err != nil {
+				return err
+			}
+
+			backlinks := removeDuplicateStr(getLinks(resp.Body))
+			for _, backlink := range backlinks {
+				url_obj, err := url.ParseRequestURI(backlink)
+				if err != nil {
+					return err
+				}
+				if !slices.Contains(WHITELIST_SCHEME, url_obj.Scheme) {
+					continue
+				}
+
+				if url_obj.Host == b.Uri.Host || url_obj.Host == "" || url_obj.Host == "www."+b.Uri.Host {
+					_, exist := b.LocalResources[url_obj.Path]
+					if exist {
+						continue
+					}
+					b.LocalResources[url_obj.Path] = false
+				} else {
+					b.ExternResources[backlink] = true
+				}
+			}
+		}
 	}
-
-	res := removeDuplicateStr(getLinks(resp.Body, domain))
-
-	// This recursive scanning, could be done alot better
-	// but it works and if it ain't broken - don't fix it
-	if recursive {
-		current_depth = current_depth + 1
-		for _, i := range res {
-			if current_depth >= MAX_DEPTH {
+	if b.Options.Recursive {
+		for {
+			b.CurrentDepth++
+			if b.CurrentDepth >= b.Options.MaxDepth {
 				break
 			}
-			if strings.HasPrefix(i, domain) {
-				rec_res, err := run(i, current_depth, insecure, recursive)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error encountered: %s\n", err)
-				}
-				res = append(res, rec_res...)
+
+			err := b.Run()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error encountered: %s\n", err)
 			}
 		}
 	}
 
-	return res, nil
+	return nil
 }
 
-func getLinks(body io.Reader, domain string) []string {
+func getLinks(body io.Reader) []string {
 	var links []string
 	z := html.NewTokenizer(body)
 	for {
@@ -111,11 +165,8 @@ func getLinks(body io.Reader, domain string) []string {
 			if token.Data == "a" {
 				for _, attr := range token.Attr {
 					if attr.Key == "href" {
-						if strings.HasPrefix(attr.Val, "#") {
+						if strings.HasPrefix(attr.Val, "#") { // Drop # anchors
 							continue
-						}
-						if strings.HasPrefix(attr.Val, "/") || strings.HasPrefix(attr.Val, "#") {
-							attr.Val = fmt.Sprintf("%s%s", domain, attr.Val)
 						}
 						links = append(links, attr.Val)
 					}
@@ -137,18 +188,18 @@ func removeDuplicateStr(strSlice []string) []string {
 	return list
 }
 
-func output(output []string, out *string) {
+func (b Backlink) Output(out *string) {
 	if *out == "" {
-		for _, v := range output {
-			fmt.Fprintln(os.Stdout, v)
+		for resource, _ := range b.LocalResources {
+			fmt.Fprintln(os.Stdout, b.LocalDomain+resource)
 		}
 	} else {
 		w, err := os.Create(*out)
 		if err != nil {
 			panic(err)
 		}
-		for _, v := range output {
-			fmt.Fprintln(w, v)
+		for resource, _ := range b.LocalResources {
+			fmt.Fprintln(w, b.LocalDomain+resource)
 		}
 	}
 }
